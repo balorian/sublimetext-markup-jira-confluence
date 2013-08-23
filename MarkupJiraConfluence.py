@@ -34,6 +34,7 @@ def rst_to_html(content):
 
 
 class MarkupJiraConfluenceCommand(sublime_plugin.TextCommand):
+    MSG_PASSWORD = "Confluence password:"
 
     def __init__(self, view):
         self.view = view
@@ -73,8 +74,8 @@ class MarkupJiraConfluenceCommand(sublime_plugin.TextCommand):
         try:
             token = self.serv.confluence2.login(username, password)
             return token
-        except Exception:
-            sublime.message_dialog('Can not login Confluence')
+        except Exception as e:
+            sublime.message_dialog('Can not login Confluence ' + e.message)
             return
 
     def get_page_by_title(self, token, space, title):
@@ -86,6 +87,7 @@ class MarkupJiraConfluenceCommand(sublime_plugin.TextCommand):
 
     def store_page(self, token, space, parent_title, title, content):
         parent_page = self.get_page_by_title(token, space, parent_title)
+        
         try:
             parent_id = parent_page['id']
         except TypeError:
@@ -108,22 +110,36 @@ class MarkupJiraConfluenceCommand(sublime_plugin.TextCommand):
         region = sublime.Region(0, self.view.size())
         contents = self.view.substr(region)
         meta, content = self.get_meta_and_content(contents)
+        self.metatext = meta
         # print('%r' % meta)
         new_content = self.markup_to_html('\n'.join(content))
+        self.content_to_post = new_content
         if not new_content:
             return
 
         settings = sublime.load_settings('MarkupJiraConfluence.sublime-settings')
-        confluence_url = settings.get('confluence_url')
-        username = settings.get('username')
-        password = settings.get('password')
-        socket.setdefaulttimeout(10)
-        sublime.status_message('posting...')
-        self.serv = ServerProxy(confluence_url)
-        token = self.get_token(username, password)
+        self.confluence_url = settings.get('confluence_url')
+        self.username = settings.get('username')
+        # password = settings.get('password')
+
+        sublime.status_message('waiting for password')
+        sublime.set_timeout(self.get_password, 50)
+
+    def get_password(self):
+        sublime.status_message('using ' + self.confluence_url)
+        self.view.window().show_input_panel(self.MSG_PASSWORD, "", self.on_done_password, None, None)
+
+    def on_done_password(self, value):
+        "Callback for the password show_input_panel."
+        self.password = value
+
+        #socket.setdefaulttimeout(10)
+        self.serv = ServerProxy(self.confluence_url)
+        token = self.get_token(self.username, value)
         if not token:
             return
-        space = meta.get('space')
-        parent_title = meta.get('parent_title')
-        title = meta.get('title')
-        self.store_page(token, space, parent_title, title, new_content)
+        space = self.metatext.get('space')
+        parent_title = self.metatext.get('parent_title')
+        title = self.metatext.get('title')
+
+        self.store_page(token, space, parent_title, title, self.content_to_post)
